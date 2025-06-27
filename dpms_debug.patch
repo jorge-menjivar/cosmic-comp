@@ -1,0 +1,68 @@
+diff --git a/src/backend/kms/surface/mod.rs b/src/backend/kms/surface/mod.rs
+index 1234567..abcdefg 100644
+--- a/src/backend/kms/surface/mod.rs
++++ b/src/backend/kms/surface/mod.rs
+@@ -466,11 +466,14 @@ impl Surface {
+ 
+     pub fn set_dpms(&mut self, on: bool) {
+         if self.dpms != on {
++            info!("Setting DPMS for output '{}' to: {}", self.output.name(), on);
+             self.dpms = on;
+             if on {
++                info!("Scheduling render for output '{}'", self.output.name());
+                 self.schedule_render();
+             } else {
+                 let _ = self.thread_command.send(ThreadCommand::DpmsOff);
++                info!("Sent DPMS off command for output '{}'", self.output.name());
+             }
+         }
+     }
+@@ -609,8 +612,10 @@ fn surface_thread(
+             }
+             Event::Msg(ThreadCommand::DpmsOff) => {
+                 if let Some(compositor) = state.compositor.as_mut() {
++                    info!("Executing DPMS off for output '{}'", state.output.name());
+                     if let Err(err) = compositor.with_compositor(|c| c.clear()) {
+                         error!("Failed to set DPMS off: {:?}", err);
++                    } else {
++                        info!("DPMS off successful for output '{}'", state.output.name());
+                     }
+                     match std::mem::replace(&mut state.state, QueueState::Idle) {
+                         QueueState::Idle => {}
+diff --git a/src/wayland/handlers/output_power.rs b/src/wayland/handlers/output_power.rs
+index 2345678..9abcdef 100644
+--- a/src/wayland/handlers/output_power.rs
++++ b/src/wayland/handlers/output_power.rs
+@@ -13,11 +13,17 @@ use crate::{
+ 
+ pub fn set_all_surfaces_dpms_on(state: &mut State) {
+     let mut changed = false;
++    let mut surface_count = 0;
++    let mut surfaces_turned_on = 0;
++    
+     for surface in kms_surfaces(state) {
++        surface_count += 1;
+         if !surface.get_dpms() {
++            tracing::info!("Turning on DPMS for output: {}", surface.output.name());
+             surface.set_dpms(true);
+             changed = true;
++            surfaces_turned_on += 1;
+         }
+     }
+ 
++    tracing::info!("DPMS wake: checked {} surfaces, turned on {}", surface_count, surfaces_turned_on);
+     if changed {
+         OutputPowerState::refresh(state);
+     }
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index 3456789..0123456 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -166,6 +166,7 @@ impl State {
+     where
+         <B as InputBackend>::Device: 'static,
+     {
++        tracing::debug!("Input event received, waking displays");
+         crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
+ 
+         use smithay::backend::input::Event;
